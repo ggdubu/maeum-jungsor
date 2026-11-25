@@ -16,7 +16,7 @@
 <header class="top"><div><div class="brand">마음 정리소</div><div class="subbrand">대화를 읽고, 마음을 정리하는 나만의 공간</div></div><div class="privacy">🔒 내 기기에 저장</div></header>
 <main>
 <section id="home" class="screen">
-<div class="hero"><div class="eyebrow">PRIVATE SPACE · VERSION 1</div><h1>보내기 전에 한 번 더,<br>마음을 정리하는 시간.</h1><p>대화의 맥락을 정리하고, 메시지를 점검하고, 하지 못한 말을 안전하게 꺼내놓으세요.</p></div>
+<div class="hero"><div class="eyebrow">PRIVATE SPACE · VERSION 5 · BUBBLE-AWARE LONG OCR</div><h1>보내기 전에 한 번 더,<br>마음을 정리하는 시간.</h1><p>대화의 맥락을 정리하고, 메시지를 점검하고, 하지 못한 말을 안전하게 꺼내놓으세요.</p></div>
 <div class="section-title">무엇을 해볼까요?</div>
 <div class="cards">
 <button class="feature" onclick="show('analysis')"><div class="ico">🔎</div><b>대화 분석</b><span>대화 내용과 흐름을 정리하고 가능한 해석을 비교해요.</span></button>
@@ -39,9 +39,9 @@
 </section>
 
 <section id="analysis" class="screen panel">
-<h2>대화 분석</h2><p class="hint">캡처 이미지를 첨부하고, 대화 내용을 텍스트로 옮겨 적어주세요. 첫 버전은 이미지 속 글자를 자동으로 읽지는 못합니다.</p>
+<h2>대화 분석</h2><p class="hint">카카오톡 캡처를 첨부하면 긴 이미지도 여러 구간으로 나눠 순서대로 글자를 추출합니다. 인식 결과에서 화자와 문장을 확인해주세요.</p>
 <div class="field"><label>분석할 상대방</label><select id="aperson"></select></div>
-<div class="field"><label>카톡 캡처 첨부 (선택)</label><input type="file" id="shot" accept="image/*" onchange="previewShot(event)"><img id="shotPreview" class="preview"><div class="btnrow"><button class="btn secondary" onclick="runOCR()">이미지에서 대화 글자 추출</button></div><p class="small">무료 OCR을 사용합니다. 한국어 인식 데이터는 처음 실행할 때 인터넷에서 불러오며, 이미지 인식 처리는 브라우저 안에서 진행됩니다.</p><div id="ocrStatus" class="small"></div></div>
+<div class="field"><label>카톡 캡처 첨부 (선택)</label><input type="file" id="shot" accept="image/*" onchange="previewShot(event)"><img id="shotPreview" class="preview"><div class="field"><label>말풍선 방향 설정</label><div class="row"><label for="rightSpeaker">오른쪽 말풍선</label><select id="rightSpeaker"><option value="나">나</option><option value="상대">상대</option></select></div><div class="row"><label for="leftSpeaker">왼쪽 말풍선</label><select id="leftSpeaker"><option value="상대">상대</option><option value="나">나</option></select></div></div><div class="btnrow"><button class="btn secondary" onclick="runOCR()">이미지에서 대화 글자 추출</button></div><p class="small">긴 세로 캡처는 여러 구간으로 나눠 확대 인식하고, 글자 위치로 좌우 말풍선을 구분합니다. 화자 방향은 카카오톡 화면에 맞게 선택해주세요. 인식 결과는 꼭 확인해야 합니다.</p><div id="ocrStatus" class="small"></div></div>
 <div class="field"><label>대화 내용</label><textarea id="chattext" placeholder="나: 무슨 생각인지 솔직히 말해줬으면 좋겠어.&#10;상대: 지금은 더 얘기하고 싶지 않아.&#10;나: 알겠어."></textarea></div>
 <div class="field"><label>상황 설명 (선택)</label><textarea id="context" style="min-height:75px" placeholder="대화 전후에 무슨 일이 있었는지, 관계가 어떤 상태인지"></textarea></div>
 <button class="btn" onclick="analyzeChat()">대화 분석하기</button><div id="analysisResult"></div>
@@ -90,25 +90,114 @@ async function runOCR(){
  const file=document.getElementById('shot').files[0],status=document.getElementById('ocrStatus');
  if(!file){toast('먼저 카톡 캡처 이미지를 선택해주세요.');return}
  status.textContent='무료 OCR 라이브러리를 불러오는 중입니다...';
+ let worker=null,bitmap=null;
  try{
   if(!window.Tesseract){
    await new Promise((resolve,reject)=>{let s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)});
   }
-  status.textContent='한국어 글자를 인식하고 있습니다. 잠시 기다려주세요...';
-  const worker=await Tesseract.createWorker('kor+eng');
-  const result=await worker.recognize(file);
-  await worker.terminate();
-  const recognized=(result.data.text||'').trim();
-  if(!recognized){status.textContent='글자를 인식하지 못했어요. 더 선명한 캡처를 사용하거나 직접 입력해주세요.';return}
+  status.textContent='한국어 인식 데이터를 준비하고 있습니다...';
+  worker=await Tesseract.createWorker('kor+eng');
+  await worker.setParameters({tessedit_pageseg_mode:'11',preserve_interword_spaces:'1'});
+  if('createImageBitmap' in window){bitmap=await createImageBitmap(file)}
+  else{
+   bitmap=await new Promise((resolve,reject)=>{let im=new Image(),u=URL.createObjectURL(file);im.onload=()=>{URL.revokeObjectURL(u);resolve(im)};im.onerror=reject;im.src=u});
+  }
+  const w=bitmap.width,h=bitmap.height;
+  // 긴 화면은 원본 기준 1050px 단위로 자르고 120px 겹쳐 경계의 문장을 보존
+  const sliceH=1050,overlap=120,total=Math.max(1,Math.ceil((h-overlap)/(sliceH-overlap)));
+  const rightName=document.getElementById('rightSpeaker')?.value||'나';
+  const leftName=document.getElementById('leftSpeaker')?.value||'상대';
+  let allMessages=[];
+  for(let i=0;i<total;i++){
+   const sy=i*(sliceH-overlap),sh=Math.min(sliceH,h-sy),scale=Math.min(2.4,3000/w);
+   const canvas=document.createElement('canvas');
+   canvas.width=Math.max(1,Math.round(w*scale));canvas.height=Math.max(1,Math.round(sh*scale));
+   const ctx=canvas.getContext('2d',{willReadFrequently:true});
+   ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+   ctx.drawImage(bitmap,0,sy,w,sh,0,0,canvas.width,canvas.height);
+   const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;
+   for(let k=0;k<d.length;k+=4){
+    const y=.299*d[k]+.587*d[k+1]+.114*d[k+2];
+    const v=Math.max(0,Math.min(255,(y-128)*1.22+128));
+    d[k]=d[k+1]=d[k+2]=v;
+   }
+   ctx.putImageData(img,0,0);
+   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+   if(!blob)throw new Error('이미지 전처리 실패');
+   status.textContent=`긴 캡처 확대 및 말풍선 위치 분석 중 (${i+1}/${total})...`;
+   const result=await worker.recognize(blob);
+   const words=(result.data.words||[]).filter(x=>x.text&&x.text.trim()&&(x.confidence??0)>=22&&x.bbox);
+   // OCR 단어 상자를 세로 위치가 가까운 줄로 묶음
+   const sorted=words.map(x=>({text:x.text.trim(),x1:x.bbox.x0,x2:x.bbox.x1,y1:x.bbox.y0,y2:x.bbox.y1,cx:(x.bbox.x0+x.bbox.x1)/2,cy:(x.bbox.y0+x.bbox.y1)/2})).sort((a,b)=>a.cy-b.cy||a.x1-b.x1);
+   let lines=[];
+   for(const word of sorted){
+    let line=lines.find(l=>Math.abs(l.cy-word.cy)<Math.max(16,(word.y2-word.y1)*.72));
+    if(!line){line={words:[],cy:word.cy,y1:word.y1,y2:word.y2};lines.push(line)}
+    line.words.push(word);line.cy=line.words.reduce((n,z)=>n+z.cy,0)/line.words.length;line.y1=Math.min(line.y1,word.y1);line.y2=Math.max(line.y2,word.y2);
+   }
+   lines=lines.map(l=>{
+    l.words.sort((a,b)=>a.x1-b.x1);
+    l.text=l.words.map(x=>x.text).join(' ').replace(/\s+([,.!?])/g,'$1').trim();
+    l.x1=Math.min(...l.words.map(x=>x.x1));l.x2=Math.max(...l.words.map(x=>x.x2));
+    l.cx=(l.x1+l.x2)/2;l.height=l.y2-l.y1;
+    return l;
+   }).filter(l=>l.text);
+   // 중앙에 표시되는 시간/날짜 조각은 화자 메시지에서 제외
+   lines=lines.filter(l=>!/^(\d{1,2}:\d{2}|오전\s*\d{1,2}:\d{2}|오후\s*\d{1,2}:\d{2}|오늘|어제)$/.test(l.text.replace(/\s+/g,' ').trim()));
+   // 화면 중앙을 기준으로 좌우 화자 추정. 짧은 중앙 텍스트는 가장 가까운 쪽으로 붙임
+   for(const l of lines){
+    const mid=w*scale/2;
+    l.side=l.cx>mid?'right':'left';
+    if(l.cx>mid*.88&&l.cx<mid*1.12&&l.text.length<12)l.side='center';
+   }
+   let groups=[];
+   for(const l of lines){
+    let g=groups[groups.length-1];
+    const gap=g?l.y1-g.y2:9999;
+    const sameSide=g&&(l.side===g.side||(l.side==='center'&&g.side!=='center'));
+    const close=g&&gap<Math.max(95,l.height*2.4);
+    const aligned=g&&Math.abs(l.x1-g.x1)<Math.max(130,w*scale*.16);
+    if(g&&sameSide&&close&&aligned){
+     g.lines.push(l);g.y2=Math.max(g.y2,l.y2);g.x1=Math.min(g.x1,l.x1);
+    }else{
+     groups.push({side:l.side,lines:[l],y1:l.y1,y2:l.y2,x1:l.x1});
+    }
+   }
+   for(const g of groups){
+    const side=g.side==='right'?'right':'left';
+    const text=g.lines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
+    if(!text)continue;
+    allMessages.push({side,text,top:sy+g.y1/scale});
+   }
+   canvas.width=0;canvas.height=0;
+  }
+  await worker.terminate();worker=null;
+  if(bitmap&&bitmap.close)bitmap.close();
+  // 겹친 구간에서 같은 말풍선이 중복된 경우만 인접 중복 제거
+  allMessages.sort((a,b)=>a.top-b.top);
+  let dedup=[];
+  for(const m of allMessages){
+   const prev=dedup[dedup.length-1];
+   if(prev&&prev.side===m.side&&prev.text===m.text&&Math.abs(prev.top-m.top)<350)continue;
+   dedup.push(m);
+  }
+  const output=dedup.map(m=>(m.side==='right'?rightName:leftName)+': '+m.text).join('\n');
+  if(!output){status.textContent='글자를 인식하지 못했어요. 더 선명한 캡처를 사용하거나 직접 입력해주세요.';return}
   const area=document.getElementById('chattext');
-  area.value=(area.value.trim()?area.value.trim()+'\n':'')+recognized;
-  status.textContent='추출 완료. 화자 이름과 문장이 정확히 인식됐는지 확인한 뒤 분석해주세요.';
-  toast('이미지에서 글자를 추출했어요.');
- }catch(err){status.textContent='OCR을 불러오지 못했습니다. 인터넷 연결을 확인하거나 대화 내용을 직접 입력해주세요.'}
+  area.value=(area.value.trim()?area.value.trim()+'\n':'')+output;
+  status.textContent=`완료: ${total}개 구간에서 ${dedup.length}개 말풍선 후보를 추출했어요. 좌우 화자 설정과 문장 순서를 반드시 확인해주세요.`;
+  toast('좌우 말풍선 기준으로 대화를 추출했어요.');
+ }catch(err){
+  if(worker){try{await worker.terminate()}catch(e){}}
+  if(bitmap&&bitmap.close)bitmap.close();
+  status.textContent='인식에 실패했어요. 캡처를 나눠 올리거나 더 선명한 원본을 사용해주세요.';
+  console.error(err);
+ }
 }
 function analyzeChat(){let text=document.getElementById('chattext').value.trim(),pid=document.getElementById('aperson').value,ctx=document.getElementById('context').value.trim();if(!text){toast('먼저 대화 내용을 입력해주세요.');return}let p=db.people.find(x=>x.id===pid),lines=text.split('\n').filter(Boolean),short=lines.filter(x=>x.replace(/[^가-힣a-zA-Z]/g,'').length<13),q=(text.match(/\?/g)||[]).length,negative=/(그만|싫어|모르겠|지쳤|힘들|그만하|연락하지|끝내|더 얘기|얘기하고 싶지)/.test(text),affection=/(보고 싶|사랑|좋아해|고마워|미안해|걱정)/.test(text),you=/(너는|네가|니가|왜 항상|맨날|도대체)/.test(text);
 let signals=[];if(short.length/lines.length>.45)signals.push('짧은 답변이 상대적으로 많습니다. 대화 에너지가 낮거나 대화를 빨리 마치려는 흐름일 수 있습니다.');if(q>2)signals.push('질문이 여러 번 등장합니다. 확인·설명 요구가 대화의 중심인지 살펴볼 필요가 있습니다.');if(negative)signals.push('거리두기·피로·거절을 나타낼 수 있는 표현이 포함돼 있습니다.');if(affection)signals.push('애정·감사·사과 표현도 포함돼 있어 부정적인 신호만으로 해석하면 안 됩니다.');if(you)signals.push('상대의 행동을 지적하는 표현이 있습니다. 상대가 방어적으로 반응할 가능성을 고려하세요.');if(!signals.length)signals.push('현재 텍스트만으로 뚜렷한 패턴을 단정하기 어렵습니다. 대화 전후 맥락과 평소 말투 비교가 필요합니다.');
-let html=`<div class="result"><h3>관찰 가능한 신호</h3><ul>${signals.map(s=>`<li>${esc(s)}</li>`).join('')}</ul><h3>가능한 해석</h3><p>${negative?'상대가 대화에 부담을 느끼거나 당장은 거리를 두려는 가능성이 있습니다. 다만 특정 상황에 대한 일시적 반응일 수도 있습니다.':short.length/lines.length>.45?'상대가 적극적으로 대화를 이어가지는 않는 모습일 수 있습니다. 평소에도 짧게 답하는 사람인지 비교해야 합니다.':'현재 자료만으로 상대의 감정 방향을 특정하기 어렵습니다. 한두 문장보다 반복되는 행동과 맥락을 우선해 보세요.'}</p><h3>판단에 필요한 추가 정보</h3><p>① 평소 답장 길이와 비교 ② 직전 갈등이나 사건 ③ 이후 상대가 먼저 대화를 이어갔는지 ④ 말과 행동이 일치하는지</p><span class="tag">관찰과 해석 구분</span><span class="tag">확신도: 낮음~중간</span><p class="small">상황 메모: ${esc(ctx||'입력 없음')}<br>첨부 이미지: ${esc(currentImage||'없음')} (이미지 문자 자동 판독 미지원)</p></div>`;
+let html=`<div class="result"><h3>관찰 가능한 신호</h3><ul>${signals.map(s=>`<li>${esc(s)}</li>`).join('')}</ul><h3>가능한 해석</h3><p>${negative?'상대가 대화에 부담을 느끼거나 당장은 거리를 두려는 가능성이 있습니다. 다만 특정 상황에 대한 일시적 반응일 수도 있습니다.':short.length/lines.length>.45?'상대가 적극적으로 대화를 이어가지는 않는 모습일 수 있습니다. 평소에도 짧게 답하는 사람인지 비교해야 합니다.':'현재 자료만으로 상대의 감정 방향을 특정하기 어렵습니다. 한두 문장보다 반복되는 행동과 맥락을 우선해 보세요.'}</p><h3>판단에 필요한 추가 정보</h3><p>① 평소 답장 길이와 비교 ② 직전 갈등이나 사건 ③ 이후 상대가 먼저 대화를 이어갔는지 ④ 말과 행동이 일치하는지</p><span class="tag">관찰과 해석 구분</span><span class="tag">확신도: 낮음~중간</span><p class="small">상황 메모: ${esc(ctx||'입력 없음')}<br>첨부 이미지: ${esc(currentImage||'없음')}</p></div>`;
 document.getElementById('analysisResult').innerHTML=html;saveRecord('대화 분석',p?p.name+' 대화 분석':'대화 분석',text,pid);toast('분석 초안을 만들고 기록했어요.')}
 function reviewMessage(){let s=document.getElementById('draft').value.trim(),goal=document.getElementById('goal').value,pid=document.getElementById('rperson').value,p=db.people.find(x=>x.id===pid);if(!s){toast('메시지를 입력해주세요.');return}let flags=[];if(s.length>250)flags.push('문장이 길어 핵심이 흐려질 수 있습니다. 핵심 감정과 요청을 나눠보세요.');if((s.match(/\?/g)||[]).length>=3)flags.push('질문이 연속되면 답을 재촉하거나 추궁하는 느낌을 줄 수 있습니다.');if(/항상|맨날|절대|하나도|도대체|너 때문에/.test(s))flags.push('항상·절대 같은 단정이나 책임을 몰아가는 표현은 방어적 반응을 부를 수 있습니다.');if(/답장 안 하면|후회할|두고 봐|가만 안/.test(s))flags.push('압박이나 위협으로 읽힐 수 있는 표현이 있어 삭제하는 편이 좋습니다.');if(/미안/.test(s))flags.push('사과가 포함돼 있습니다. 변명보다 구체적으로 무엇을 미안해하는지 분명히 하면 좋습니다.');if(!flags.length)flags.push('뚜렷한 압박 표현은 적습니다. 다만 상대가 지금 대화할 여력이 있는지 고려해야 합니다.');
 let rewritten=s.replace(/항상|맨날/g,'그럴 때가 있다고 느꼈어').replace(/도대체/g,'내가 이해하기로는').replace(/너 때문에/g,'그 상황에서 나는').trim();let verdict=/(답장 안 하면|후회할|두고 봐|가만 안)/.test(s)?'지금은 보내지 않는 편을 권합니다':s.length>350?'잠시 보류하고 핵심만 남겨 줄이는 편을 권합니다':'목적과 상황을 확인한 뒤 보낼 수 있습니다';
